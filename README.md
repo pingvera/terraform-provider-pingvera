@@ -114,7 +114,7 @@ go run github.com/hashicorp/terraform-plugin-docs/cmd/tfplugindocs generate
 
 ## Контракт API
 
-Провайдер бьёт в существующий write-API hub, аутентификация — Bearer
+Провайдер работает с существующим write-API hub, аутентификация — Bearer
 API-токен (организация определяется токеном, не передаётся в теле запроса):
 
 - Мониторы: `POST /api/v1/monitors`, `GET /api/v1/monitors` (единичного GET
@@ -125,7 +125,4 @@ API-токен (организация определяется токеном, 
   (ключ ответа `status_pages`), `PUT /api/v1/status-pages/{id}` (полная
   замена конфигурации), `DELETE /api/v1/status-pages/{id}`.
 
-Контракт сверен с исходным кодом основного репозитория
-(`internal/api/monitors.go`, `internal/api/statuspages.go`) на момент
-написания провайдера — при изменении API-контракта провайдер нужно
-обновить вручную (это не generated-код).
+
