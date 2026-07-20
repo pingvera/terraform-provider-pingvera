@@ -1,0 +1,7 @@
+# Локальные артефакты Terraform-разработки (не коммитим)
+terraform-provider-pingvera
+*.tfstate
+*.tfstate.*
+.terraform/
+.terraform.lock.hcl
+dist/
