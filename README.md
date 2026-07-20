@@ -1,128 +1,137 @@
-# terraform-provider-pingvera
+# Terraform Provider for Pingvera
 
-Terraform-провайдер для [Pingvera](https://pingvera.ru) — сервиса
-мониторинга «снаружи и изнутри». Провайдер — **чистый клиент** уже
-существующего write-API hub (`/api/v1/monitors`, `/api/v1/status-pages`):
-никакой бизнес-логики (квоты, тарифы, валидация) здесь нет, всё это остаётся
-на сервере.
+The official Terraform provider for [Pingvera](https://pingvera.ru) — a website &
+server monitoring platform (multi-region uptime checks + host/container metrics via
+an agent, incidents, alerts, and status pages).
 
-Это отдельный Go-модуль (`go.mod` со своим module path), изолированный от
-основного репозитория Pingvera — зависимости Terraform Plugin Framework не
-попадают в основной `go.mod`/`go.sum`. Каталог живёт внутри монорепо
-временно; перед публикацией будет вынесен в собственный репозиторий (см.
-раздел «Публикация в Terraform Registry» ниже).
+Manage your monitors and status pages as code, in the same `plan`/`apply` workflow
+as the rest of your infrastructure.
 
-## Ресурсы
+## Requirements
 
-- `pingvera_monitor` — монитор (http/tcp/dns/tls/wp/domain/links/heartbeat/…). См. [docs/resources/pingvera_monitor.md](docs/resources/pingvera_monitor.md).
-- `pingvera_status_page` — публичная статус-страница. См. [docs/resources/pingvera_status_page.md](docs/resources/pingvera_status_page.md).
+- [Terraform](https://developer.hashicorp.com/terraform/downloads) >= 1.0
+  (>= 1.5 to use the `import` blocks emitted by `pingvera terraform generate`)
+- A Pingvera account and an API token with `write:*` scopes
+  ([app.pingvera.ru](https://app.pingvera.ru) → Settings → API tokens)
 
-Примеры конфигурации — в [examples/](examples/).
-
-## Конфигурация провайдера
+## Usage
 
 ```hcl
+terraform {
+  required_providers {
+    pingvera = {
+      source  = "pingvera/pingvera"
+      version = "~> 0.1"
+    }
+  }
+}
+
 provider "pingvera" {
-  endpoint = "https://app.pingvera.ru" # или https://app.pingvera.com (EN-инстанс)
-  token    = var.pingvera_token         # лучше через переменную окружения, см. ниже
+  # endpoint = "https://app.pingvera.ru"  # default; use https://app.pingvera.com for the EN instance
+  # token    = "pv_..."                   # better via the PINGVERA_TOKEN env var
+}
+
+resource "pingvera_monitor" "website" {
+  type   = "http"
+  name   = "Main website"
+  target = "https://example.com"
+}
+
+resource "pingvera_status_page" "public" {
+  slug     = "acme"
+  title    = "Acme Status"
+  theme    = "dark"
+  monitors = [pingvera_monitor.website.id]
 }
 ```
 
-| Атрибут | Env fallback | Обязателен | Описание |
-|---|---|---|---|
-| `endpoint` | `PINGVERA_URL` | нет (дефолт `https://app.pingvera.ru`) | Базовый URL hub. |
-| `token` | `PINGVERA_TOKEN` | да | API-токен (`pv_...`), создаётся в дашборде: Настройки → API-токены. Нужны скоупы `write:monitors` и/или `write:status-pages`. |
-
-Токен — секрет, не коммитьте его в `.tf`. Рекомендуемый способ:
-
-```sh
-export PINGVERA_TOKEN=pv_...
+```bash
+export PINGVERA_TOKEN=pv_xxxxxxxx
+terraform init
+terraform plan
 terraform apply
 ```
 
-## Локальная разработка
+## Provider configuration
 
-Провайдер не опубликован в Terraform Registry. Чтобы Terraform CLI
-использовал локально собранный бинарник вместо скачивания из реестра,
-настройте `dev_overrides` в `~/.terraformrc`:
+| Argument   | Env var          | Required | Default                   |
+|------------|------------------|----------|---------------------------|
+| `endpoint` | `PINGVERA_URL`   | no       | `https://app.pingvera.ru` |
+| `token`    | `PINGVERA_TOKEN` | yes      | —                         |
+
+Never commit the token to `.tf` files — pass it via `PINGVERA_TOKEN`.
+
+## Resources
+
+### `pingvera_monitor`
+
+| Attribute             | Type                    | Notes                                                                                     |
+|-----------------------|-------------------------|-------------------------------------------------------------------------------------------|
+| `type`                | string, required        | `http`, `tcp`, `dns`, `tls`, `wp`, `domain`, `links`, `heartbeat`, … (forces replacement) |
+| `name`                | string, required        |                                                                                           |
+| `target`              | string, required        | URL/host being checked (forces replacement)                                               |
+| `interval_s`          | number, optional        | check interval, seconds                                                                   |
+| `fail_threshold`      | number, optional        | consecutive failures before an incident                                                   |
+| `degraded_latency_ms` | number, optional        | latency threshold for the "degraded" state                                                |
+| `enabled`             | bool, optional          |                                                                                           |
+| `tags`                | set(string), optional   |                                                                                           |
+| `config`              | string (JSON), optional | type-specific settings                                                                    |
+| `id`                  | string, computed        | monitor public_id                                                                         |
+
+### `pingvera_status_page`
+
+| Attribute     | Type                  | Notes                                            |
+|---------------|-----------------------|--------------------------------------------------|
+| `slug`        | string, required      | URL slug of the public page                      |
+| `title`       | string, optional      |                                                  |
+| `theme`       | string, optional      | `""` (default), `light`, `dark`, `midnight`      |
+| `brand_color` | string, optional      | `#rrggbb`                                         |
+| `monitors`    | set(string), optional | monitor public_ids (use `pingvera_monitor.x.id`) |
+| `hosts`       | set(string), optional | agent/server public_ids                          |
+| `logo_url`, `header_md`, `footer_md`, `embed_domains`, `timezone`, `custom_domain` | string, optional | |
+| `id`          | string, computed      | status page public_id                            |
+
+Full docs: [`docs/resources/`](docs/resources/). More examples: [`examples/`](examples/).
+
+## Bootstrap from an existing account
+
+Already have monitors and status pages in the dashboard? The Pingvera CLI generates
+ready-to-apply HCL — with `import` blocks pre-wired, so the first `terraform plan`
+shows **zero drift**:
+
+```bash
+export PINGVERA_TOKEN=pv_xxxxxxxx
+pingvera terraform generate > pingvera.tf
+terraform plan   # No changes.
+```
+
+Get the CLI:
+
+```bash
+curl -fsSL https://app.pingvera.ru/dl/pingvera-cli-linux-amd64 -o pingvera && chmod +x pingvera
+# macOS: pingvera-cli-darwin-arm64 / -amd64 · Windows: pingvera-cli-windows-amd64.exe
+```
+
+## Local development
+
+Until the provider is published to the Terraform Registry, point Terraform at a
+locally built binary via `~/.terraformrc`:
 
 ```hcl
 provider_installation {
   dev_overrides {
-    "pingvera/pingvera" = "/root/pingvera/terraform-provider-pingvera/bin"
+    "pingvera/pingvera" = "/path/to/bin"
   }
   direct {}
 }
 ```
 
-Сборка и разработка:
-
-```sh
-cd terraform-provider-pingvera
+```bash
 go build -o bin/terraform-provider-pingvera .
-go vet ./...
 go test ./...
+go vet ./...
 ```
 
-С `dev_overrides` `terraform init` не нужен (провайдер не тянется из
-реестра); `terraform plan`/`apply` сразу используют локальный бинарник.
+## License
 
-### Acceptance-тесты (TF_ACC)
-
-В модуле сознательно нет acceptance-тестов (`TF_ACC=1`): они требуют живой
-hub и установленный Terraform CLI, что не подходит для CI без реального
-окружения. Ручная проверка — через `examples/` на dev-стенде.
-
-### Документация ресурсов
-
-Документация в `docs/` — рукописный Markdown (не генерируется). Если позже
-понадобится синхронизировать со схемой автоматически, можно подключить
-[`terraform-plugin-docs`](https://github.com/hashicorp/terraform-plugin-docs):
-
-```sh
-go run github.com/hashicorp/terraform-plugin-docs/cmd/tfplugindocs generate
-```
-
-(команда не запускалась — добавит зависимость и потянет доп. тулинг, не
-нужный, пока провайдер не публикуется).
-
-## Публикация в Terraform Registry
-
-Не выполнялась и не входит в эту задачу. Когда придёт время публиковать:
-
-1. **Отдельный репозиторий.** Terraform Registry требует репозиторий вида
-   `terraform-provider-pingvera` на GitHub (имя аккаунта = `namespace`
-   провайдера). Перенести содержимое этого каталога в новый репозиторий
-   (сохранив историю через `git subtree split` или начать с чистого листа).
-2. **GPG-подпись релизов.** Завести GPG-ключ, добавить публичный ключ в
-   настройки провайдера на registry.terraform.io (Publish → Provider →
-   Signing Keys).
-3. **GitHub Actions + goreleaser.** Стандартный шаблон HashiCorp
-   (`.github/workflows/release.yml` + `.goreleaser.yml`) собирает бинарники
-   под все платформы, подписывает их GPG-ключом и публикует GitHub Release
-   с `terraform-provider-pingvera_X.Y.Z_manifest.json`,
-   `_SHA256SUMS`, `_SHA256SUMS.sig`.
-4. **`terraform-registry-manifest.json`** в корне репозитория — версия
-   протокола провайдера (`protocol_versions: ["6.0"]` для plugin-framework).
-5. Зарегистрировать провайдер на registry.terraform.io (GitHub OAuth,
-   выбрать репозиторий) — реестр сам подхватывает новые GitHub Release с
-   тегами `vX.Y.Z`.
-
-До этого момента провайдер распространяется только через `dev_overrides`
-(см. выше) или локальную установку в
-`~/.terraform.d/plugins/registry.terraform.io/pingvera/pingvera/<version>/<os>_<arch>/`.
-
-## Контракт API
-
-Провайдер работает с существующим write-API hub, аутентификация — Bearer
-API-токен (организация определяется токеном, не передаётся в теле запроса):
-
-- Мониторы: `POST /api/v1/monitors`, `GET /api/v1/monitors` (единичного GET
-  нет — чтение через список + фильтр по `public_id`), `PATCH
-  /api/v1/monitors/{id}`, `DELETE /api/v1/monitors/{id}`. `type`/`target`
-  неизменяемы (`RequiresReplace` в схеме).
-- Статус-страницы: `POST /api/v1/status-pages`, `GET /api/v1/status-pages`
-  (ключ ответа `status_pages`), `PUT /api/v1/status-pages/{id}` (полная
-  замена конфигурации), `DELETE /api/v1/status-pages/{id}`.
-
-
+[MPL-2.0](LICENSE).
